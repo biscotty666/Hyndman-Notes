@@ -1,0 +1,317 @@
+# 3 Time Series Decomposition
+
+# 3.1 Transformations and Adjustments
+
+Types:
+
+-   *Calendar adjustments*: eg. to accommodate different number of trading days, use average sales per day
+-   *Population adjustments*: use *per capita*
+-   *Inflation adjustments*: adjust based on CPI $x_{t} = y_{t}/z_{t} * z_{\text{base year}}$ for $z$ being the price index
+-   *Mathematical transformations*: eg, Box-Cox
+
+## Population adjustment example
+
+```{r}
+library(fpp3)
+```
+
+```{r}
+global_economy |>
+  filter(Country == 'Australia') |>
+  autoplot(GDP/Population) +
+  labs(title = "GDP per capita", y="$US")
+```
+
+## Inflation adjustment example
+
+```{r}
+print_retail <- aus_retail |>
+  filter(Industry == "Newspaper and book retailing") |>
+  group_by(Industry) |>
+  index_by(Year = year(Month)) |>
+  summarise(Turnover = sum(Turnover))
+aus_economy <- global_economy |>
+  filter(Code == "AUS")
+```
+
+```{r}
+print_retail |>
+  left_join(aus_economy, by = "Year") |>
+  mutate(Adjusted_turnover = Turnover / CPI * 100) |>
+  pivot_longer(c(Turnover, Adjusted_turnover),
+               values_to = "Turnover") |>
+  mutate(name = factor(name,
+                       levels = c("Turnover", "Adjusted_turnover"))) |>
+  ggplot(aes(x = Year, y = Turnover)) +
+  geom_line() +
+  facet_grid(name ~ ., scales = "free_y") +
+  labs(title = "Turnover: Australian print media industry",
+       y = "$AU")
+```
+
+Using the adjusted figures, the true industry decline is unmasked.
+
+## Mathematical transformation Box-Cox
+
+$$
+\begin{equation}
+  w_t  =
+    \begin{cases}
+      \log(y_t) & \text{if $\lambda=0$};  \\
+      (\text{sign}(y_t)|y_t|^\lambda-1)/\lambda & \text{otherwise}.
+    \end{cases}
+    \tag{3.1}
+\end{equation}
+$$
+
+This is actually a modified Box-Cox transformation, discussed in Bickel & Doksum ([1981](https://otexts.com/fpp3/transformations.html#ref-Bickel1981)), which allows for negative values of $y_t$ provided λ\>0.
+
+The logarithm in a Box-Cox transformation is always a natural logarithm (i.e., to base $e$). So if λ=0, natural logarithms are used, but if λ≠0, a power transformation is used, followed by some simple scaling.
+
+If λ=1, then wt=yt−1, so the transformed data is shifted downwards but there is no change in the shape of the time series. For all other values of λ, the time series will change shape.
+
+```{r}
+lambda <- aus_production |>
+  features(Gas, features = guerrero) |>
+  pull(lambda_guerrero)
+aus_production |>
+  autoplot(box_cox(Gas, lambda)) +
+  labs(y = "",
+       title = latex2exp::TeX(paste0(
+         "Transformed gas production with $\\lambda$ = ",
+         round(lambda, 2)
+       )))
+```
+
+# 3.1 Time Series Components
+
+-   *Additive*: $y_{t} = S_{t} + T_{t} + R_t$
+-   *Multiplicative*: $y_{t} = S_{t} \times T_{t} \times R_t$
+
+To can use a log transformation and then additive to achieve multiplicative.
+
+## Example: US retail employment
+
+We will decompose the number of persons employed in retail.
+
+```{r}
+us_retail_employment <- us_employment |>
+  filter(year(Month) >= 1990, Title == "Retail Trade") |>
+  select(-Series_ID)
+autoplot(us_retail_employment, Employed) +
+  labs(y = "Persons (thousands)",
+       title = "Total employment in US retail")
+```
+
+```{r}
+dcmp <- us_retail_employment |>
+  model(stl = STL(Employed))
+components(dcmp)
+```
+
+```{r}
+components(dcmp) |>
+  as_tsibble() |>
+  autoplot(Employed, colour="gray") +
+  geom_line(aes(y=trend), color="#D55E00") +
+  labs(
+    y = "Persons (thousands)",
+    title = "Total employment in US retail"
+  )
+```
+
+```{r}
+components(dcmp) |> autoplot()
+```
+
+## Seasonally adjusted data
+
+```{r}
+components(dcmp) |>
+  as_tsibble() |>
+  autoplot(Employed, color='gray') +
+  geom_line(aes(y=season_adjust), colour="#0072B2") +
+  labs(y = "Persons (thousands)",
+       title = "Total employment in US retail")
+  
+```
+
+Seasonally adjusted series contain the remainder component as well as the trend-cycle. Therefore, they are not “smooth”, and “downturns” or “upturns” can be misleading. If the purpose is to look for turning points in a series, and interpret any changes in direction, then it is better to use the trend-cycle component rather than the seasonally adjusted data.
+
+# 3.3 Moving Averages
+
+## MA Smoothing
+
+$$
+\begin{equation}
+  \hat{T}_{t} = \frac{1}{m} \sum_{j=-k}^k y_{t+j}
+\end{equation}
+$$
+
+where $m=2k+1$.
+
+```{r}
+global_economy |>
+  filter(Country == "Australia") |>
+  autoplot(Exports) +
+  labs(y="% of GDP", title = "Total Australian exports")
+```
+
+```{r}
+aus_exports <- global_economy |>
+  filter(Country == "Australia") |>
+  mutate(
+    `5-MA` = slider::slide_dbl(Exports, mean,
+                               .before = 2,
+                               .after = 2,
+                               .complete = TRUE)
+  )
+```
+
+```{r}
+aus_exports |>
+  autoplot(Exports) +
+  geom_line(aes(y = `5-MA`), color = "#D55E00") +
+  labs(y = "% of GDP",
+       title = "Total Australian exports")
+```
+
+## Moving averages of moving averages
+
+For even-order moving averages, eg. periods of 12 or 4. Apply an M2 period after the even selection.
+
+```{r}
+beer <- aus_production |>
+  filter(year(Quarter) >= 1992) |>
+  select(Quarter, Beer)
+beer_ma <- beer |>
+  mutate(
+    `4-MA` = slider::slide_dbl(Beer, mean,
+                               .before = 1, .after = 2,
+                               .complete = TRUE),
+    `2x4-MA` = slider::slide_dbl(`4-MA`, mean,
+                                 .before = 1, .after = 0,
+                                 .complete = TRUE)
+  )
+```
+
+```{r}
+beer_ma
+```
+
+## Estimate trend-cycle with seasonal data
+
+```{r}
+us_retail_employment_ma <- us_retail_employment |>
+  mutate(
+    `12-MA` = slider::slide_dbl(Employed, mean,
+                                .before = 5, .after = 6,
+                                .complete = TRUE),
+    `2x12-MA` = slider::slide_dbl(`12-MA`, mean,
+                                  .before = 1, .after = 0,
+                                  .complete = TRUE)
+  )
+us_retail_employment_ma |>
+  autoplot(Employed, colour = "gray") +
+  geom_line(aes(y = `2x12-MA`), colour = "#D55E00") +
+  labs(y = "Persons (thousands)",
+       title = "Total employment in US retail")
+```
+
+### Weighted moving averages
+
+Combinations of moving averages result in weighted moving averages. For example, the $2×4$-MA discussed above is equivalent to a weighted 5-MA with weights given by $\left[\frac{1}{8},\frac{1}{4},\frac{1}{4},\frac{1}{4},\frac{1}{8}\right]$. In general, a weighted m-MA can be written as $$\hat{T}_t = \sum_{j=-k}^k a_j y_{t+j}$$, where k=(m−1)/2, and the weights are given by $[a_{-k}, \dots, a_k$. It is important that the weights all sum to one and that they are symmetric so that $a_j = a_{-j}$. The simple m-MA is a special case where all of the weights are equal to 1/m.
+
+A major advantage of weighted moving averages is that they yield a smoother estimate of the trend-cycle. Instead of observations entering and leaving the calculation at full weight, their weights slowly increase and then slowly decrease, resulting in a smoother curve.
+
+# 3.4 Classical Decomposition
+
+While classical decomposition is still widely used, it is not recommended, as there are now several much better methods. Some of the problems with classical decomposition are summarised below.
+
+-   
+
+-   The estimate of the trend-cycle is unavailable for the first few and last few observations. For example, if m=12, there is no trend-cycle estimate for the first six or the last six observations. Consequently, there is also no estimate of the remainder component for the same time periods.
+
+-   The trend-cycle estimate tends to over-smooth rapid rises and falls in the data.
+
+-   Classical decomposition methods assume that the seasonal component repeats from year to year. For many series, this is a reasonable assumption, but for some longer series it is not. For example, electricity demand patterns have changed over time as air conditioning has become more widespread. In many locations, the seasonal usage pattern from several decades ago had its maximum demand in winter (due to heating), while the current seasonal pattern has its maximum demand in summer (due to air conditioning). Classical decomposition methods are unable to capture these seasonal changes over time.
+
+-   Occasionally, the values of the time series in a small number of periods may be particularly unusual. For example, the monthly air passenger traffic may be affected by an industrial dispute, making the traffic during the dispute different from usual. The classical method is not robust to these kinds of unusual values.
+
+```{r}
+us_retail_employment |>
+  model(
+    classical_decomposition(Employed, type = "additive")
+  ) |>
+  components() |>
+  autoplot() +
+  labs(title = "Classical additive decomposition of total
+                  US retail employment")
+```
+
+# 3.5 Methods used by agencies (SEATS and X-11)
+
+## X-11
+
+Classical but includes additional steps. Allows for holidays, known predictors, seasonal component can vary over time.
+
+```{r}
+x11_dcmp <- us_retail_employment |>
+  model(x11 = X_13ARIMA_SEATS(Employed ~ x11())) |>
+  components()
+autoplot(x11_dcmp) +
+  labs(title =
+    "Decomposition of total US retail employment using X-11.")
+```
+
+```{r}
+x11_dcmp |>
+  ggplot(aes(x = Month)) +
+  geom_line(aes(y = Employed, colour = "Data")) +
+  geom_line(aes(y = season_adjust,
+                colour = "Seasonally Adjusted")) +
+  geom_line(aes(y = trend, colour = "Trend")) +
+  labs(y = "Persons (thousands)",
+       title = "Total employment in US retail") +
+  scale_colour_manual(
+    values = c("gray", "#0072B2", "#D55E00"),
+    breaks = c("Data", "Seasonally Adjusted", "Trend")
+  )
+```
+
+```{r}
+x11_dcmp |>
+  gg_subseries(seasonal)
+```
+
+## SEATS
+
+```{r}
+seats_dcmp <- us_retail_employment |>
+  model(seats = X_13ARIMA_SEATS(Employed ~ seats())) |>
+  components()
+autoplot(seats_dcmp) +
+  labs(title =
+    "Decomposition of total US retail employment using SEATS")
+```
+
+# 3.6 STL decomposition
+
+STL has several advantages over classical decomposition, and the SEATS and X-11 methods:
+
+-   Unlike SEATS and X-11, STL will handle any type of seasonality, not only monthly and quarterly data.
+-   The seasonal component is allowed to change over time, and the rate of change can be controlled by the user.
+-   The smoothness of the trend-cycle can also be controlled by the user.
+-   It can be robust to outliers (i.e., the user can specify a robust decomposition), so that occasional unusual observations will not affect the estimates of the trend-cycle and seasonal components. They will, however, affect the remainder component.
+
+On the other hand, STL has some disadvantages. In particular, it does not handle trading day or calendar variation automatically, and it only provides facilities for additive decompositions.
+
+```{r}
+us_retail_employment |>
+  model(
+    STL(Employed ~ trend(window = 7) +
+                   season(window = "periodic"),
+    robust = TRUE)) |>
+  components() |>
+  autoplot()
+```
