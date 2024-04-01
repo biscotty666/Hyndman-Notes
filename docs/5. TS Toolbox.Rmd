@@ -1,0 +1,517 @@
+---
+title: "Ch 5 TS Toolbox"
+output: html_notebook
+---
+
+# Toolbox
+
+# Tidy Forecasting Workflow
+
+-   Data preparation (tidy)
+
+-   Plot the data (visualize)
+
+-   Define a model (specify)
+
+-   Train the model (estimate)
+
+-   Check the model (evaluate)
+
+-   Produce forecasts (forecast)
+
+```{r}
+library(fpp3)
+```
+
+## Model GDP per capita over time
+
+### Prepare the relevant variable
+
+```{r}
+gdppc <- global_economy |>
+  mutate(GDP_per_capita = GDP / Population)
+```
+
+### Plot the data (look at one country)
+
+```{r}
+gdppc |>
+  filter(Country == "Sweden") |>
+  autoplot(GDP_per_capita) +
+  labs(y = "$US", title = "GDP per capita for Sweden")
+```
+
+### Define the model. In this example, use a trend model from TSLM
+
+```{r}
+TSLM(GDP_per_capita ~ trend()) -> trend_model
+```
+
+### Train the model
+
+```{r}
+fit <- gdppc |>
+  model(trend_model = trend_model)
+```
+
+```{r}
+fit
+```
+
+### Check model performance
+
+### Produce forecasts
+
+```{r}
+fit |> forecast(h = "3 years")
+```
+
+.mean contains the point forecast, GDP_per_capita contains the distribution.
+
+```{r}
+fit |>
+  forecast(h = "3 years") |>
+  filter(Country == "Sweden") |>
+  autoplot(gdppc) +
+  labs(y = "$US", title = "GDP per capita for Sweden")
+```
+
+# Some simple methods
+
+-   Mean method: future values equal to historical mean
+
+-   Naive method: forecast equal to last observation
+
+-   Seaonal naive method: forecast equal to last observed value from same season
+
+-   Drift method: Naive but forecasts can increase or decrease over time
+
+## Example: beer production
+
+```{r}
+train <- aus_production |>
+  filter_index("1992 Q1" ~ "2006 Q4")
+beer_fit <- train |>
+  model(
+    Mean = MEAN(Beer),
+    `Naive` = NAIVE(Beer),
+    `Seasonal naive` = SNAIVE(Beer)
+  )
+beer_fc <- beer_fit |> forecast(h = 14)
+beer_fc |>
+  autoplot(train, level = NULL) +
+  autolayer(
+    filter_index(aus_production, "2007 Q1" ~ .),
+    colour = 'black'
+  ) +
+  labs(
+    y = "Megalitres",
+    title = "Forecasts for quarterly beer production"
+  ) +
+  guides(colour = guide_legend(title = "Forecast"))
+```
+
+## Example Google stock price
+
+```{r}
+# Re-index based on trading days
+google_stock <- gafa_stock |>
+  filter(Symbol == "GOOG", year(Date) >= 2015) |>
+  mutate(day = row_number()) |>
+  update_tsibble(index = day, regular = TRUE)
+# Filter the year of interest
+google_2015 <- google_stock |> filter(year(Date) == 2015)
+# Fit the models
+google_fit <- google_2015 |>
+  model(
+    Mean = MEAN(Close),
+    `Naïve` = NAIVE(Close),
+    Drift = NAIVE(Close ~ drift())
+  )
+# Produce forecasts for the trading days in January 2016
+google_jan_2016 <- google_stock |>
+  filter(yearmonth(Date) == yearmonth("2016 Jan"))
+google_fc <- google_fit |>
+  forecast(new_data = google_jan_2016)
+# Plot the forecasts
+google_fc |>
+  autoplot(google_2015, level = NULL) +
+  autolayer(google_jan_2016, Close, colour = "black") +
+  labs(y = "$US",
+       title = "Google daily closing stock prices",
+       subtitle = "(Jan 2015 - Jan 2016)") +
+  guides(colour = guide_legend(title = "Forecast"))
+```
+
+# Fitted values and residuals
+
+```{r}
+augment(beer_fit)
+```
+
+There are three new columns added to the original data:
+
+-   `.fitted` contains the fitted values;
+-   `.resid` contains the residuals;
+-   `.innov` contains the “innovation residuals” which, in this case, are identical to the regular residuals
+
+# Residual diagnostics
+
+A good forecast method will have these properties
+
+1.  The innovation residuals are uncorrelated. If there are correlations between innovation residuals, then there is information left in the residuals which should be used in computing forecasts.
+2.  The innovation residuals have zero mean. If they have a mean other than zero, then the forecasts are biased.
+3.  The innovation residuals have constant variance. This is known as “homoscedasticity”.
+4.  The innovation residuals are normally distributed.
+
+Not all are necessary, and models satisfying these may still be able to be improved.
+
+```{r}
+autoplot(google_2015, Close) +
+  labs(y = "$US",
+       title = "Google daily closing stock prices in 2015")
+```
+
+```{r}
+aug <- google_2015 |>
+  model(NAIVE(Close)) |>
+  augment()
+autoplot(aug, .innov) +
+  labs(y = "$US",
+       title = "Residuals from the naïve method")
+```
+
+```{r}
+aug |>
+  ggplot(aes(x = .innov)) +
+  geom_histogram() +
+  labs(title = "Histogram of residuals")
+```
+
+```{r}
+aug |>
+  ACF(.innov) |>
+  autoplot() +
+  labs(title = "Residuals from the naïve method")
+```
+
+```{r}
+google_2015 |>
+  model(NAIVE(Close)) |>
+  gg_tsresiduals()
+```
+
+## Portmanteau tests for autocorrelation
+
+## Box-Pierce test
+
+$$
+Q = T \sum_{k=1}^\ell r_k^2,
+$$
+
+## Ljung-Box test
+
+$$
+Q^* = T(T+2) \sum_{k=1}^\ell (T-k)^{-1}r_k^2.
+$$
+
+Large values suggest that autocorrelations do not come from a white noise series.
+
+If the autocorrelations did come from a white noise series, then both Q and Q∗ would have a χ2 distribution with ℓ degrees of freedom.
+
+```{r}
+aug |> features(.innov, box_pierce, lag=10)
+```
+
+```{r}
+aug |> features(.innov, ljung_box, lag=10)
+```
+
+An alternative simple approach that may be appropriate for forecasting the Google daily closing stock price is the drift method. The `tidy()` function shows the one estimated parameter, the drift coefficient, measuring the average daily change observed in the historical data
+
+```{r}
+fit <- google_2015 |> model(RW(Close ~ drift()))
+tidy(fit)
+```
+
+```{r}
+augment(fit) |> features(.innov, ljung_box, lag=10)
+```
+
+As with the naïve method, the residuals from the drift method are indistinguishable from a white noise series.
+
+# Distributional forecasts and prediction intervals
+
+## Forecast distributions
+
+The point forecast is the mean of the distribution. The distribution is expected to be normal.
+
+## Prediction intervals
+
+| Percentage | Multiplier |
+|------------|------------|
+| 50         | 0.67       |
+| 55         | 0.76       |
+| 60         | 0.84       |
+| 65         | 0.93       |
+| 70         | 1.04       |
+| 75         | 1.15       |
+| 80         | 1.28       |
+| 85         | 1.44       |
+| 90         | 1.64       |
+| 95         | 1.96       |
+| 96         | 2.05       |
+| 97         | 2.17       |
+| 98         | 2.33       |
+| 99         | 2.58       |
+
+## Benchmark methods
+
+| Benchmark method | $h$-step forecast sd                           |
+|------------------|------------------------------------------------|
+| Mean             | $\hat\sigma_h = \hat\sigma\sqrt{1 + 1/T}$      |
+| Naive            | $\hat\sigma_h = \hat\sigma\sqrt{h}$            |
+| Seasonal naive   | $\hat\sigma_h = \hat\sigma\sqrt{k+1}$          |
+| Drift            | $\hat\sigma_h = \hat\sigma\sqrt{h(1+h/(T-1))}$ |
+
+```{r}
+google_2015 |>
+  model(NAIVE(Close)) |>
+  forecast(h = 10) |>
+  hilo()
+```
+
+The `hilo()` function converts the forecast distributions into intervals. By default, 80% and 95% prediction intervals are returned, although other options are possible via the `level` argument.
+
+```{r}
+google_2015 |>
+  model(NAIVE(Close)) |>
+  forecast(h = 10) |>
+  autoplot(google_2015) +
+  labs(title="Google daily closing stock price", y="$US" )
+```
+
+## Prediction intervals non-normal distributions
+
+Use bootstrapped residuals.
+
+$$y_t = y_{t-1} + e_t.$$ use a randomly sampled error from the past.
+
+$$y^*_{T+2} = y_{T+1}^* + e^*_{T+2},$$
+
+where $e^∗_{T+2}$ is another draw from the collection of residuals. Continuing in this way, we can simulate an entire set of future values for our time series.
+
+Doing this repeatedly, we obtain many possible futures. To see some of them, we can use the `generate()` function.
+
+```{r}
+fit <- google_2015 |>
+  model(NAIVE(Close))
+sim <- fit |> generate(h = 30, times = 5, bootstrap = TRUE)
+sim
+```
+
+```{r}
+google_2015 |>
+  ggplot(aes(x = day)) +
+  geom_line(aes(y = Close)) +
+  geom_line(aes(y = .sim, color = as.factor(.rep)),
+            data = sim) +
+  labs(title="Google daily closing stock price", y="$US" ) +
+  guides(colour = "none")
+```
+
+This is all built into the forecast() function so you do not need to call generate() directly
+
+```{r}
+fc <- fit |> forecast(h = 30, bootstrap = TRUE)
+fc
+```
+
+```{r}
+autoplot(fc, google_2015) +
+  labs(title = "Google daily closing stock price", y="$US")
+```
+
+```{r}
+google_2015 |>
+  model(NAIVE(Close)) |>
+  forecast(h = 10, bootstrap = TRUE, times = 1000) |>
+  hilo()
+```
+
+# Forecasting with transformations
+
+## Prediction intervals with transformations
+
+In general, back-transformation is performed automatically by `fable`.
+
+## Bias adjustments
+
+Mathematical transformations like Box-Cox return median instead of mean. In order to use the mean, we use bias-adjusted point forecasts.
+
+```{r}
+fc <- prices |>
+  filter(!is.na(eggs)) |>
+  model(RW(log(eggs) ~ drift())) |>
+  forecast(h = 50) |>
+  mutate(.median = median(eggs))
+fc |>
+  autoplot(prices |> filter(!is.na(eggs)), level = 80) +
+  geom_line(aes(y = .median), data = fc, linetype = 2, col = "blue") +
+  labs(title = "Annual egg prices",
+       y = "$US (in cents adjusted for inflation) ")
+```
+
+The dashed line in Figure 5.17 shows the forecast medians while the solid line shows the forecast means.
+
+# Forecasting with decomposition
+
+Forecasting the seasonal component and the seasonally adjusted component separately.
+
+-   Seasonal component usually assumed to be slow or unchanging, so a seasonal naive method
+-   Seasonally adjusted component uses any non-seasonal method, eg. drift, Holt's, non-seasonal ARIMA
+
+## Example US retail employment
+
+```{r}
+us_retail_employment <- us_employment |>
+  filter(year(Month) >= 1990, Title == "Retail Trade")
+dcmp <- us_retail_employment |>
+  model(STL(Employed ~ trend(window = 7), robust=TRUE)) |>
+  components() |>
+  select(-.model)
+dcmp |>
+  model(NAIVE(season_adjust)) |>
+  forecast() |>
+  autoplot(dcmp) +
+  labs(y = "Number of people",
+       title = "US retail employment")
+```
+
+Figure 5.18 shows naïve forecasts of the seasonally adjusted US retail employment data. These are then “reseasonalised” by adding in the seasonal naïve forecasts of the seasonal component
+
+Or, more easily:
+
+```{r}
+fit_dcmp <- us_retail_employment |>
+  model(stlf = decomposition_model(
+    STL(Employed ~ trend(window = 7), robust = TRUE),
+    NAIVE(season_adjust)
+  ))
+fit_dcmp |>
+  forecast() |>
+  autoplot(us_retail_employment)+
+  labs(y = "Number of people",
+       title = "US retail employment")
+```
+
+The ACF of the residuals, shown in Figure 5.20, displays significant autocorrelations. These are due to the naïve method not capturing the changing trend in the seasonally adjusted series.
+
+```{r}
+fit_dcmp |> gg_tsresiduals()
+```
+
+# Evaluating point forecast accuracy
+
+## Functions to subset time series
+
+```{r}
+aus_production |> filter(year(Quarter) >= 1995)
+```
+
+same as...
+
+```{r}
+aus_production |> filter_index("1995 Q1" ~ .)
+```
+
+Extract last 20 observations
+
+```{r}
+aus_production |> slice(n()-19:0)
+```
+
+With groups
+
+```{r}
+aus_retail |> 
+  group_by(State, Industry) |> 
+  slice(1:12)
+```
+
+## Examples
+
+```{r}
+recent_production <- aus_production |> 
+  filter(year(Quarter) >= 1992)
+beer_train <- recent_production |> 
+  filter(year(Quarter) <= 2007)
+
+beer_fit <- beer_train |> 
+  model(
+    Mean = MEAN(Beer),
+    `Naïve` = NAIVE(Beer),
+    `Seasonal naïve` = SNAIVE(Beer),
+    Drift = RW(Beer ~ drift())
+  )
+
+beer_fc <- beer_fit |> 
+  forecast(h = 10)
+
+beer_fc |> 
+  autoplot(
+    aus_production |> filter(year(Quarter) >= 1992),
+    level = NULL
+  ) +
+    labs(
+    y = "Megalitres",
+    title = "Forecasts for quarterly beer production"
+  ) +
+  guides(color = guide_legend(title="Forecast"))
+```
+
+```{r}
+accuracy(beer_fc, recent_production)
+```
+
+It is obvious from the graph that the seasonal naïve method is best for these data, although it can still be improved, as we will discover later. Sometimes, different accuracy measures will lead to different results as to which forecast method is best. However, in this case, all of the results point to the seasonal naïve method as the best of these four methods for this data set.
+
+To take a non-seasonal example, consider the Google stock price. The following graph shows the closing stock prices from 2015, along with forecasts for January 2016 obtained from three different methods.
+
+```{r}
+google_fit <- google_2015 |> 
+  model(
+    Mean = MEAN(Close),
+    `Naïve` = NAIVE(Close),
+    Drift = RW(Close ~ drift())
+  )
+
+google_fc <- google_fit |> 
+  forecast(google_jan_2016)
+
+google_fc |> 
+  autoplot(bind_rows(google_2015, google_jan_2016),
+           level = NULL) +
+  labs(y = "$US",
+       title = "Google closing stock prices from Jan 2015") +
+  guides(color = guide_legend(title = "Forecast"))
+```
+
+```{r}
+accuracy(google_fc, google_stock)
+```
+
+# Evaluating distributional forecast accuruacy
+
+## Quantile scores
+
+Consider the Google stock price example from the previous section. Figure [5.23](https://otexts.com/fpp3/distaccuracy.html#fig:googlepi) shows an 80% prediction interval for the forecasts from the naïve method.
+
+```{r}
+google_fc |> 
+  filter(.model == "Naïve") |> 
+  autoplot(bind_rows(google_2015, google_jan_2016), level = 80) +
+  labs(y = "$US",
+       title = "Google closing stock prices", 
+       caption = "Naïve forecasts of the Google stock price for Jan 2016, along with 80% prediction intervals")
+```

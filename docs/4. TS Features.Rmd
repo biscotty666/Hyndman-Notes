@@ -1,0 +1,233 @@
+---
+title: "Ch 4 TS Features"
+output: html_document
+date: "2024-03-23"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r}
+library(fpp3)
+library(feasts)
+
+```
+
+# Time Series Features
+
+## Simple statistics
+
+### Single Feature
+
+```{r}
+tourism |>
+  features(Trips, list(mean = mean)) |>
+  arrange(desc(mean))
+```
+
+```{r}
+tourism |>
+  features(Trips, list(mean = mean)) |>
+  arrange(desc(mean)) |>
+  head(10) |>
+  print.data.frame()
+```
+
+```{r}
+tourism |> features(Trips, quantile) |> View()
+```
+
+### Multiple Features
+
+```{r}
+tourism |> features(Trips, quantile) -> df
+df
+```
+
+```{r}
+print.data.frame(head(df))
+```
+
+## ACF Features
+
+`feat_acf()`
+
+-   First autocorrelation coefficient
+-   sum of square of first ten coefs
+-   first ac coef for differenced data
+-   SS first 10 coefs
+-   ditto twice differenced data
+-   first seasonal lag for seasonal data only
+
+```{r}
+tourism |> features(Trips, feat_acf)
+```
+
+## STL Features
+
+Remember
+
+$$
+y_t = T_t + S_{t} + R_t
+$$
+
+Strength of trend:
+
+$$
+F_T = \max\left(0, 1 - \frac{\text{Var}(R_t)}{\text{Var}(T_t+R_t)}\right)
+$$
+
+Strength of seasonality
+
+$$
+F_S = \max\left(0, 1 - \frac{\text{Var}(R_t)}{\text{Var}(S_{t}+R_t)}\right)
+$$
+
+```{r}
+tourism |> features(Trips, feat_stl)
+```
+
+```{r}
+tourism |>
+  features(Trips, feat_stl) |>
+  ggplot(aes(x = trend_strength, y = seasonal_strength_year,
+             col = Purpose)) +
+  geom_point() +
+  facet_wrap(vars(State))
+```
+
+Holiday travel shows greatest seasonality. Strongest trends are in Victoria and Western Australia. To plot the *most seasonal series*:
+
+```{r}
+tourism |>
+  features(Trips, feat_stl) |>
+  filter(
+    seasonal_strength_year == max(seasonal_strength_year)
+  ) |>
+  left_join(tourism, by = c("State", "Region", "Purpose"), multiple = "all") |>
+  ggplot(aes(x = Quarter, y = Trips)) +
+  geom_line() +
+  facet_grid(vars(State, Region, Purpose))
+```
+
+This shows holiday trips to the most popular ski region of Australia.
+
+The `feat_stl()` function returns several more features other than those discussed above.
+
+-   `seasonal_peak_year` indicates the timing of the peaks —
+    which month or quarter contains the largest seasonal component. This
+    tells us something about the nature of the seasonality. In the
+    Australian tourism data, if Quarter 3 is the peak seasonal period, then
+    people are travelling to the region in winter, whereas a peak in Quarter
+    1 suggests that the region is more popular in summer.
+
+-   `seasonal_trough_year` indicates the timing of the troughs — which month or quarter contains the smallest seasonal component.
+
+-   `spikiness` measures the prevalence of spikes in the remainder component Rt
+
+of the STL decomposition. It is the variance of the leave-one-out variances of Rt
+
+-   `linearity` measures the linearity of the trend component
+    of the STL decomposition. It is based on the coefficient of a linear
+    regression applied to the trend component.
+
+-   `curvature` measures the curvature of the trend component
+    of the STL decomposition. It is based on the coefficient from an
+    orthogonal quadratic regression applied to the trend component.
+
+-   `stl_e_acf1` is the first autocorrelation coefficient of the remainder series.
+
+-   `stl_e_acf10` is the sum of squares of the first ten autocorrelation coefficients of the remainder series.
+
+## Exploring Australian tourism data
+
+Calculate 48 features for every combination of the three key variables.
+
+```{r}
+tourism_features <- tourism |>
+  features(Trips, feature_set(pkgs = "feasts"))
+tourism_features
+```
+
+```{r, message=FALSE, fig.height=12, fig.width=10}
+library(glue)
+tourism_features |>
+  select_at(vars(contains("season"), Purpose)) |>
+  mutate(
+    seasonal_peak_year = seasonal_peak_year +
+      4*(seasonal_peak_year==0),
+    seasonal_trough_year = seasonal_trough_year +
+      4*(seasonal_peak_year==0),
+    seasonal_peak_year = glue("Q{seasonal_peak_year}"),
+    seasonal_trough_year = glue("Q{seasonal_peak_year}")
+  ) |>
+  GGally::ggpairs(mapping = aes(color = Purpose))
+```
+
+Notice
+
+-   The three numerical measures related to seasonality (`seasonal_strength_year`, `season_acf1` and `season_pacf`) are all positively correlated.
+
+-   The bottom left panel and the top right panel both show that the
+    most strongly seasonal series are related to holidays (as we saw
+    previously).
+
+-   The bar plots in the bottom row of the `seasonal_peak_year` and `seasonal_trough_year` columns show that seasonal peaks in Business travel occur most often in Quarter 3, and least often in Quarter 1.
+
+It is difficult to explore more than a handful of variables in this way. A useful way to handle many more variables is to use a dimension reduction technique such as principal components. This gives linear combinations of variables that explain the most variation in the original data. We can compute the principal components of the tourism features as follows.
+
+```{r}
+library(broom)
+pcs <- tourism_features |>
+  select(-State, -Region, -Purpose) |>
+  prcomp(scale = TRUE) |>
+  augment(tourism_features)
+pcs |>
+  ggplot(aes(x = .fittedPC1, y = .fittedPC2, col = Purpose)) +
+  geom_point() +
+  theme(aspect.ratio = 1)
+```
+
+Notice:
+
+-   Holiday travel behaves much differently than other types
+
+-   Anomalous data
+
+Explore the four anomalous data points
+
+```{r}
+outliers <- pcs |>
+  filter(.fittedPC1 > 10) |>
+  select(Region, State, Purpose, .fittedPC1, .fittedPC2)
+outliers
+```
+
+```{r}
+outliers |>
+  left_join(tourism, by=c("State", "Region", "Purpose"), multiple = 'all') |>
+  mutate(Series = glue("{State}", "{Region}", "{Purpose}", .sep = "\n\n")) |>
+  ggplot(aes(x = Quarter, y = Trips)) +
+  geom_line() +
+  facet_grid(Series ~ ., scales="free") +
+  labs(title = "Outlying time series in PC space")
+```
+
+We can speculate why these series are identified as unusual.
+
+-   Holiday visits to the south coast of NSW is highly seasonal but has
+    almost no trend, whereas most holiday destinations in Australia show
+    some trend over time.
+
+-   Melbourne is an unusual holiday destination because it has almost no
+    seasonality, whereas most holiday destinations in Australia have highly
+    seasonal tourism.
+
+-   The north western corner of Western Australia is unusual because it
+    shows an increase in business tourism in the last few years of data, but
+    little or no seasonality.
+
+-   The south western corner of Western Australia is unusual because it
+    shows both an increase in holiday tourism in the last few years of data
+    and a high level of seasonality.

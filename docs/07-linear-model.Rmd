@@ -1,0 +1,440 @@
+---
+title: "Ch 7 The Linear Model"
+output: html_notebook
+---
+
+# Simple linear regression
+
+```{r}
+library(fpp3)
+```
+
+```{r}
+str(us_change)
+```
+
+```{r}
+us_change |> 
+  pivot_longer(c(Consumption, Income), names_to = "Series") |> 
+  autoplot(value) +
+  labs(y = "% change")
+```
+
+```{r, message=FALSE}
+us_change |> 
+  ggplot(aes(x = Income, y = Consumption)) +
+  labs(y = "Consumption (quarterly % change)",
+       x = "Income (quarterly % change)",
+       caption = "Quarterly changes in consumption expenditure versus quarterly changes in personal income and the fitted regression line.") +
+  geom_point() +
+  geom_smooth(method = "lm", se = FALSE)
+```
+
+```{r}
+us_change |> 
+  model(TSLM(Consumption ~ Income)) |> 
+  report()
+```
+
+# Multiple linear regression
+
+```{r}
+us_change |> 
+  select(-Consumption, -Income) |> 
+  pivot_longer(-Quarter) |> 
+  ggplot(aes(Quarter, value, color = name)) +
+  geom_line() +
+  facet_grid(name ~ ., scales = "free_y") +
+  guides(color = "none") +
+  labs(y = "% change",
+       title = "Industrial production, personal savings and unemployment",
+       subtitle = "Quarterly percent changes 1970Q1 to 2019Q2"
+       )
+```
+
+```{r, message=FALSE}
+us_change |> 
+  GGally::ggpairs(columns = 2:6)
+```
+
+## Assumptions
+
+First, we assume that the model is a reasonable approximation to reality; that is, the relationship between the forecast variable and the predictor variables satisfies this linear equation.
+
+Second, we make the following assumptions about the errors $(\varepsilon_{1},\dots,\varepsilon_{T})$:
+
+-   they have mean zero; otherwise the forecasts will be systematically biased.
+
+-   they are not autocorrelated; otherwise the forecasts will be inefficient, as there is more information in the data that can be exploited.
+
+-   they are unrelated to the predictor variables; otherwise there would be more information that should be included in the systematic part of the model.
+
+It is also useful to have the errors being normally distributed with a constant variance $\sigma^2$ in order to easily produce prediction intervals.
+
+Another important assumption in the linear regression model is that each predictor $x$ is not a random variable. If we were performing a controlled experiment in a laboratory, we could control the values of each $x$ (so they would not be random) and observe the resulting values of $y$. With observational data (including most data in business and economics), it is not possible to control the value of $x$, we simply observe it. Hence we make this an assumption.
+
+# Least squares
+
+## Example: US consumption expenditure
+
+```{r}
+fit_consMR <- us_change |> 
+  model(tslm = TSLM(Consumption ~ Income + Production +
+                      Unemployment + Savings))
+report(fit_consMR)
+```
+
+For forecasting purposes, the final two columns are of limited interest. The “t value” is the ratio of an estimated $\beta$ coefficient to its standard error and the last column gives the p-value: the probability of the estimated $\beta$ coefficient being as large as it is if there was no real relationship between consumption and the corresponding predictor. This is useful when studying the effect of each predictor, but is not particularly useful for forecasting.
+
+## Fitted values
+
+```{r}
+augment(fit_consMR) |> 
+  ggplot(aes(x = Quarter)) +
+  geom_line(aes(y = Consumption, colour = "Data")) +
+  geom_line(aes(y = .fitted, colour = "Fitted")) +
+  labs(y = NULL,
+       title = "Percent change in US consumption expenditure",
+       subtitle = "Time plot of actual vs. predicted") +
+  scale_colour_manual(values = c(Data = "black", Fitted = "#D55E00")) +
+  guides(colour = guide_legend(title = NULL))
+```
+
+```{r}
+augment(fit_consMR) |> 
+  ggplot(aes(Consumption, .fitted)) +
+  geom_point() +
+  labs(
+    y = "Fitted (predicted values)",
+    x = "Data (actual values)",
+    title = "Percent change in US consumption expenditure"
+  ) +
+  geom_abline(intercept = 0, slope = 1)
+```
+
+# Evaluating the regression model
+
+## Histogram of residuals
+
+```{r}
+fit_consMR |> gg_tsresiduals()
+```
+
+```{r}
+augment(fit_consMR) |> 
+  features(.innov, ljung_box, lag = 10) |> print.AsIs()
+```
+
+## Residual plots against predictors
+
+Should show no pattern
+
+```{r}
+us_change |> 
+  left_join(residuals(fit_consMR), by = "Quarter") |> 
+  pivot_longer(Income:Unemployment,
+               names_to = "regressor", values_to = "x") |> 
+  ggplot(aes(x, .resid)) +
+  geom_point() +
+  facet_wrap(. ~ regressor, scales = "free_x") +
+  labs(y = "Residuals", x = "")
+```
+
+## Residual plots against fitted values
+
+Should also show no pattern, otherwise heterodastic, consider log or sqrt.
+
+```{r}
+augment(fit_consMR) |> 
+  ggplot(aes(.fitted, .resid)) +
+  geom_point() +
+  labs(x = "Fitted", y = "Residuals")
+```
+
+## Outliers and influential observations
+
+Usually influential observations are outliers but not all outliers are influential.
+
+Outliers can simply be data entry errors. In any case, explore...
+
+If outliers are real and influential, report results both including and including.
+
+![The effect of outliers and influential observations on regression](images/outlier-1.png)
+
+## Spurious regression
+
+Time series are generally non-stationary, and can seem to be correlated to unrelated variables. High $R^2$ and high residual autocorrelation can be signs of spurious regression.
+
+![Trending time series data can appear to be related, as shown in this example where air passengers in Australia are regressed against rice production in Guinea.](images/spurious-1.png)
+
+```{r}
+fit <- aus_airpassengers |> 
+  filter(Year <= 2011) |> 
+  left_join(guinea_rice, by = "Year") |> 
+  model(TSLM(Passengers ~ Production))
+report(fit)
+```
+
+```{r}
+fit |> gg_tsresiduals()
+```
+
+## Some useful predictors
+
+-   Trend
+-   Dummy variables
+-   Seasonal dummy variables
+-   Intervention variables
+
+*Dummy variable trap*: include 1 less variable than possible results since any group only has n-1 dof.
+
+### Example
+
+```{r}
+recent_production <- aus_production |>
+  filter(year(Quarter) >= 1992)
+recent_production |>
+  autoplot(Beer) +
+  labs(y = "Megalitres",
+       title = "Australian quarterly beer production")
+```
+
+```{r}
+fit_beer <- recent_production |> 
+  model(TSLM(Beer ~ trend() + season()))
+report(fit_beer)
+```
+
+Note that `trend()` and `season()` are not standard functions; they are “special” functions that work within the `TSLM()` model formulae.
+
+There is an average downward trend of -0.34 megalitres per quarter. On average, the second quarter has production of 34.7 megalitres lower than the first quarter, the third quarter has production of 17.8 megalitres lower than the first quarter, and the fourth quarter has production of 72.8 megalitres higher than the first quarter.
+
+```{r}
+augment(fit_beer) |> 
+  ggplot(aes(Quarter)) +
+  geom_line(aes(y = Beer, colour = "Data")) +
+  geom_line(aes(y = .fitted, colour = "Fitted")) +
+  scale_colour_manual(
+    values = c(Data = "black", Fitted = "#D55E00")
+  ) +
+  labs(y = "Megaliters",
+       title = "Australian quarterly beer production",
+       caption = "Time plot of beer production and predicted beer production") +
+  guides(color = guide_legend(title = "Series"))
+```
+
+```{r}
+augment(fit_beer) |>
+  ggplot(aes(x = Beer, y = .fitted,
+             colour = factor(quarter(Quarter)))) +
+  geom_point() +
+  labs(y = "Fitted", x = "Actual values",
+       title = "Australian quarterly beer production",
+       caption = "Actual beer production plotted against predicted beer production") +
+  geom_abline(intercept = 0, slope = 1) +
+  guides(colour = guide_legend(title = "Quarter"))
+```
+
+## Intervention variables
+
+-   spike: one-time
+-   step: change which becomes permanent
+
+Trading days, distributed lags, Easter
+
+## Fourier series
+
+Alternative to seasonal dummy variables. If $m$ is seasonal:
+
+$$
+x_{1,t} = \sin\left(\textstyle\frac{2\pi t}{m}\right),
+  x_{2,t} = \cos\left(\textstyle\frac{2\pi t}{m}\right),
+  x_{3,t} = \sin\left(\textstyle\frac{4\pi t}{m}\right),
+$$
+
+$$
+x_{4,t} = \cos\left(\textstyle\frac{4\pi t}{m}\right),
+  x_{5,t} = \sin\left(\textstyle\frac{6\pi t}{m}\right),
+  x_{6,t} = \cos\left(\textstyle\frac{6\pi t}{m}\right),
+$$
+
+With Fourier terms, we often need fewer predictors than with dummy variables, especially when $m$ is large. This makes them useful for weekly data, for example, where $m \approx 52$. For short seasonal periods (e.g., quarterly data), there is little advantage in using Fourier terms over seasonal dummy variables.
+
+```{r}
+fourier_beer <- recent_production |> 
+  model(TSLM(Beer ~ trend() + fourier(K = 2)))
+report(fourier_beer)
+```
+
+The `K` argument to `fourier()` specifies how many pairs of sin and cos terms to include. The maximum allowed is $K=m/2$ where $m$ is the seasonal period. Because we have used the maximum here, the results are identical to those obtained when using seasonal dummy variables.
+
+# Selecting predictors
+
+```{r}
+glance(fit_consMR) |> 
+  select(adj_r_squared, CV, AIC, AICc, BIC) |> 
+  print.AsIs()
+```
+
+-   Adjusted $R^2$ - keeps $R^2$ from increasing just by increasing number of predictors
+
+-   Cross-validation - "leave-one-out" for each variable, then MSE
+
+-   Akaike's Information Criterion - CV with penalty for additional predictors
+
+-   Corrected AIC - Correction for small values of $T$
+
+-   Schwarz's Bayesian Information Criterion - penalizes number of parameters more heavily
+
+Best for TSA: AICc, AIC or CV are best for forecasting.
+
+-   Best subset regression: where possible, test all possible subsets
+
+-   Stepwise regression:
+
+    -   backward starting with all potential predictors and drop least significant
+
+    -   forward adding one at a time and keeping the most significant
+
+    -   hybrid starting with a potential subset and testing both add/drop
+
+**Beware inference after predictor selection!**
+
+# Forecasting with regression
+
+-   Ex-ante: using only information available in advance. These are genuine forecasts. They require forecasts of the predictors
+
+-   Ex-post: Incorporate later information, eg. observed values. Not genuine forecasts. Used to study model behavior.
+
+```{r}
+recent_production <- aus_production |> 
+  filter(year(Quarter) >= 1992)
+fit_beer <- recent_production |> 
+  model(TSLM(Beer ~ trend() + season()))
+fc_beer <- forecast(fit_beer)
+fc_beer |> 
+  autoplot(recent_production) +
+  labs(
+    title = "Forecasts of beer production using regression",
+    y = "megaliters",
+  )
+```
+
+## Scenario based forecasting
+
+For example, a US policy maker may be interested in comparing the predicted change in consumption when there is a constant growth of 1% and 0.5% respectively for income and savings with no change in the employment rate, versus a respective decline of 1% and 0.5%, for each of the four quarters following the end of the sample.
+
+```{r}
+fit_consBest <- us_change |> 
+  model(lm = TSLM(
+    Consumption ~ Income + Savings + Unemployment
+  ))
+future_scenarios <- scenarios(
+  Increase = new_data(us_change, 4) |> 
+    mutate(Income = 1, Savings = 0.5, Unemployment = 0),
+  Decrease = new_data(us_change, 4) |> 
+    mutate(Income = -1, Savings = -0.5, Unemployment = 0),
+  names_to = "Scenario"
+)
+
+fc <- forecast(fit_consBest, new_data = future_scenarios)
+
+us_change |> 
+  autoplot(Consumption) +
+  autolayer(fc) +
+  labs(title = "US consumption", y = "% change")
+```
+
+## Predictive regression model
+
+Problem of needing future values for predictors
+
+-   use scenario-based forecasting
+
+-   use lagged values for predictors
+
+## Prediction intervals
+
+#### Example
+
+The estimated simple regression line in the US consumption example is
+
+$$\hat{y}_t=0.54+0.27x_t$$
+
+Assuming that for the next four quarters, personal income will increase by its historical mean value of $x=0.73\%$, consumption is forecast to increase by $0.74\%$ and the corresponding 80% and 95% prediction intervals are $[−0.02,1.5]$ and $[−0.42,1.9]$, respectively (calculated using R). If we assume an extreme increase of 12% in income, then the prediction intervals are considerably wider.
+
+```{r}
+fit_cons <- us_change |> 
+  model(TSLM(Consumption ~ Income))
+new_cons <- scenarios(
+  "Average increase" = new_data(us_change, 4) |> 
+    mutate(Income = mean(us_change$Income)),
+  "Extreme increase" = new_data(us_change, 4) |> 
+    mutate(Income = 12),
+  names_to = "Scenario"
+)
+fcast <- forecast(fit_cons, new_cons)
+
+us_change |> 
+  autoplot(Consumption) +
+  autolayer(fcast) +
+  labs(title = "US consumption", y = "% change")
+```
+
+# Nonlinear regression
+
+Transformations:
+
+-   log-log
+-   log-linear (xform fc var)
+-   linear-log (xform pred var)
+
+Piece-wise linear
+
+## Forecasting with nonlinear trend
+
+### Piecewise Example: Boston marathon winning times
+
+We will fit some trend models to the Boston marathon winning times for men. First we extract the men’s data and convert the winning times to a numerical value. The course was lengthened (from 24.5 miles to 26.2 miles) in 1924, which led to a jump in the winning times, so we only consider data from that date onwards.
+
+```{r}
+boston_men <- boston_marathon |> 
+  filter(Year >= 1924) |> 
+  filter(Event == "Men's open division") |> 
+  mutate(Minutes = as.numeric(Time)/60)
+```
+
+```{r}
+boston_men |> 
+  autoplot(Minutes)
+```
+
+There appears to be a period of decline between 1950 and 1980 followed by a leveling out. Adding breaks can help capture these changes.
+
+```{r}
+fit_trends <- boston_men |> 
+  model(
+    linear = TSLM(Minutes ~ trend()),
+    exponential = TSLM(log(Minutes) ~ trend()),
+    piecwise = TSLM(Minutes ~ trend(knots = c(1950, 1980)))
+  )
+fc_trends <- fit_trends |> forecast(h = 10)
+
+boston_men |> 
+  autoplot(Minutes) +
+  geom_line(data = fitted(fit_trends),
+            aes(y = .fitted, color = .model)) +
+  autolayer(fc_trends, alpha = 0.5, level = 95) +
+  labs(y = "Minutes",
+       title = "Boston marathon winning times")
+```
+
+# Correlation is not causation
+
+**confounder**: a variable not included in a model which influences both the target and at least one predictor.
+
+Correlations are useful for forecasting even when there is no causal relationship, but it is better if such a relationship can be determined.
+
+Correlated predictors are generally not a problem, but should be taken into account in scenario based forecasting.
+
+In general multicolinearity is not a problem as long as the correlation coefficient isn't 1 or -1.
