@@ -1,0 +1,33 @@
+---
+title: "Ch 8 Exponential smoothing"
+output: html_notebook
+---
+
+```{r}
+library(fpp3)
+```
+
+# Simple exponential smoothing
+
+```{r}
+algeria_economy <- global_economy |> 
+  filter(Country == "Algeria")
+algeria_economy |> 
+  autoplot(Exports) +
+  labs(y = "% of GDP", title = "Exports: Algeria")
+```
+
+There is no clear trend or pattern, although there are periods with trends.
+
+Exponential smoothing allows to "phase out" the effect of prior periods.
+
+|           | $\alpha=0.2$ | $\alpha=0.4$ | $\alpha=0.6$ | $\alpha=0.8$ |
+|-----------|:-------------|:-------------|:-------------|:-------------|
+| $y_T$     | 0.2000       | 0.4000       | 0.6000       | 0.8000       |
+| $y_{T-1}$ | 0.1600       | 0.2400       | 0.2400       | 0.1600       |
+| $y_{T-2}$ | 0.1280       | 0.1440       | 0.0960       | 0.0320       |
+| $y_{T-3}$ | 0.1024       | 0.0864       | 0.0384       | 0.0064       |
+| $y_{T-4}$ | 0.0819       | 0.0518       | 0.0154       | 0.0013       |
+| $y_{T-5}$ | 0.0655       | 0.0311       | 0.0061       | 0.0003       |
+
+Large $\alpha$ gives more weight to recent observations.
