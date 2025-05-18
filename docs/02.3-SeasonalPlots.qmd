@@ -1,0 +1,63 @@
+---
+title: "02.3 - Seasonal plots"
+format: gfm
+---
+
+```{r, setup, include=FALSE}
+knitr::opts_chunk$set(paged.print = FALSE)
+```
+
+```{r message=FALSE}
+library(fpp3)
+```
+
+
+```{r}
+a10 <- PBS |>
+  filter(ATC2 == "A10") |>
+  select(Month, Concession, Type, Cost) |>
+  summarise(TotalC = sum(Cost)) |>
+  mutate(Cost = TotalC / 1e6)
+a10
+```
+
+
+```{r}
+a10 |>
+  gg_season(Cost, labels = 'both') + 
+  labs(y = "$ (millions)",
+       title = "Seasonal plot: Antidiabetic drug sales")
+```
+
+A seasonal plot allows the underlying seasonal pattern to be seen more clearly, and is especially useful in identifying years in which the pattern changes.
+
+## Multiple seasonal periods
+
+Where the data has more than one seasonal pattern, the period argument can be used to select which seasonal plot is required. The vic_elec data contains half-hourly electricity demand for the state of Victoria, Australia. We can plot the daily pattern, weekly pattern or yearly pattern by specifying the period argument as shown in Figures 2.5–2.7.
+
+In the first plot, the three days with 25 hours are when daylight saving ended in each year and so these days contained an extra hour. There were also three days with only 23 hours each (when daylight saving started) but these are hidden beneath all the other lines on the plot.
+
+```{r}
+vic_elec |> gg_season(Demand, period = "day") +
+  theme(legend.position = "none") +
+  labs(y="MWh", title = "Elecricity demand: Victoria")
+```
+
+```{r}
+vic_elec |> gg_season(Demand, period = "week") +
+  theme(legend.position = "none") +
+  labs(y="MWh", title="Electricity demand: Victoria")
+```
+
+```{r}
+vic_elec |> gg_season(Demand, period = "year") +
+  theme(legend.position = "none") +
+  labs(y="MWh", title="Electricity demand: Victoria")
+```
+
+```{r}
+vic_elec |> gg_season(Demand, period = "month") +
+  theme(legend.position = "none") +
+  labs(y="MWh", title="Electricity demand: Victoria")
+```
+
