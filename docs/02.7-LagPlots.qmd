@@ -1,0 +1,27 @@
+---
+title: "02.7 - Lag Plots"
+format: gfm
+---
+
+```{r, setup, include=FALSE}
+knitr::opts_chunk$set(paged.print = FALSE)
+```
+
+```{r message=FALSE}
+library(fpp3)
+```
+
+
+## Lag Plots
+
+```{r}
+recent_production <- aus_production |>
+  filter(year(Quarter) >= 2000)
+```
+
+```{r, fig.width=8, fig.height=8}
+recent_production |>
+  gg_lag(Beer, geom = "point") +
+  labs(x = "lag(Beer, k)")
+```
+

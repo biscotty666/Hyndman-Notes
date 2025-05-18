@@ -1,0 +1,44 @@
+---
+title: "02.8 - Autocorrelation"
+format: gfm
+---
+
+```{r, setup, include=FALSE}
+knitr::opts_chunk$set(paged.print = FALSE)
+```
+
+```{r message=FALSE}
+library(fpp3)
+```
+
+
+```{r}
+a10 <- PBS |>
+  filter(ATC2 == "A10") |>
+  select(Month, Concession, Type, Cost) |>
+  summarise(TotalC = sum(Cost)) |>
+  mutate(Cost = TotalC / 1e6)
+```
+# Autocorrelation function (ACF)
+
+```{r}
+recent_production <- aus_production |>
+  filter(year(Quarter) >= 2000)
+recent_production |> ACF(Beer, lag_max = 9)
+```
+
+```{r}
+recent_production |> 
+  ACF(Beer) |>
+  autoplot() + labs(title = "Australian beer production")
+```
+
+## ACF plot showing trend and seasonality
+
+```{r}
+a10 |>
+  ACF(Cost, lag_max = 48) |>
+  autoplot() +
+  labs(title = "Australian beer production")
+```
+
