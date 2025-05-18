@@ -1,0 +1,120 @@
+---
+title: "02.1-tsibble object"
+format: gfm
+---
+
+```{r, setup, include=FALSE}
+knitr::opts_chunk$set(paged.print = FALSE)
+```
+
+```{r message=FALSE}
+library(fpp3)
+```
+
+# `tsibble` objects
+
+## Index variable
+
+```{r}
+y <- tsibble(
+  Year = 2015:2019,
+  Observation = c(123, 39, 78, 52, 110),
+  index = Year
+)
+y
+```
+
+> convert tibble to tsibble
+
+```{r}
+month <- c("2019 Jan", "2019 Feb", "2019 Mar", "2019 Apr", "2019 May")
+observation <- c(50, 23, 34, 30, 25)
+z <- tibble(
+  Month = month,
+  Observation = observation
+)
+z
+```
+
+Other time class functions can be used depending on the frequency of the observations.
+
+| Frequency | Function                 |
+|-----------|--------------------------|
+| Annual    | start:end                |
+| Quarterly | yearquarter()            |
+| Monthly   | yearmonth()              |
+| Weekly    | yearweek()               |
+| Daily     | as_date(), ymd()         |
+| Sub-daily | as_datetime(), ymd_hms() |
+
+```{r}
+z |>
+  mutate(Month = yearmonth(Month)) |> 
+  as_tsibble(index = Month)
+```
+
+## Key variables
+
+```{r}
+olympic_running
+```
+
+The 14 time series in this object are uniquely identified by the keys: the Length and Sex variables. The distinct() function can be used to show the categories of each variable or even combinations of variables:
+
+```{r}
+olympic_running |> distinct(Sex)
+```
+
+## Working with `tsibble` objects
+
+```{r}
+PBS
+```
+
+This contains monthly data on Medicare Australia prescription data from July 1991 to June 2008. These are classified according to various concession types, and Anatomical Therapeutic Chemical (ATC) indexes. For this example, we are interested in the Cost time series (total cost of scripts in Australian dollars).
+
+Note that the index variable Month, and the keys Concession and Type, would be returned even if they were not explicitly selected as they are required for a tsibble (to ensure each row contains a unique combination of keys and index).
+
+```{r}
+a10 <- PBS |>
+  filter(ATC2 == "A10") |>
+  select(Month, Concession, Type, Cost) |>
+  summarise(TotalC = sum(Cost)) |>
+  mutate(Cost = TotalC / 1e6)
+a10
+```
+
+## Reading Files
+
+```{r message=FALSE}
+prison <- readr::read_csv(("https://OTexts.com/fpp3/extrafiles/prison_population.csv"))
+```
+
+```{r}
+head(prison)
+```
+
+```{r}
+ prison <- prison |>
+  mutate(Quarter = yearquarter(Date)) |>
+  select(-Date) |>
+  as_tsibble(key=c(State, Gender, Legal, Indigenous),
+             index = Quarter)
+ head(prison)
+```
+
+For a tsibble to be valid, it requires a unique index for each combination of keys. The tsibble() or as_tsibble() function will return an error if this is not true.
+
+## Seasonal period
+
+Some common periods for different time intervals are shown in the table below:
+
+| Data     | Minute | Hour | Day   | Week   | Year     |
+|----------|--------|------|-------|--------|----------|
+| Quarters |        |      |       |        | 4        |
+| Months   |        |      |       |        | 12       |
+| Weeks    |        |      |       |        | 52       |
+| Days     |        |      |       | 7      | 365.25   |
+| Hours    |        |      | 24    | 168    | 8766     |
+| Minutes  |        | 60   | 1440  | 10080  | 525960   |
+| Seconds  | 60     | 3600 | 86400 | 604800 | 31557600 |
