@@ -1,5 +1,6 @@
 .ipynb_checkpoints/
 .Rproj.user
+.Rhistory
 images/
 data/
 .envrc

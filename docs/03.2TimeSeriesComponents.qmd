@@ -1,0 +1,66 @@
+---
+title: "3.2 - Time series componenets"
+format: gfm
+---
+
+```{r, setup, include=FALSE}
+knitr::opts_chunk$set(paged.print = FALSE)
+```
+
+```{r message=FALSE}
+library(fpp3)
+```
+
+-   *Additive*: $y_{t} = S_{t} + T_{t} + R_t$
+-   *Multiplicative*: $y_{t} = S_{t} \times T_{t} \times R_t$
+
+To can use a log transformation and then additive to achieve multiplicative.
+
+## Example: US retail employment
+
+We will decompose the number of persons employed in retail.
+
+```{r}
+us_retail_employment <- us_employment |>
+  filter(year(Month) >= 1990, Title == "Retail Trade") |>
+  select(-Series_ID)
+autoplot(us_retail_employment, Employed) +
+  labs(y = "Persons (thousands)",
+       title = "Total employment in US retail")
+```
+
+```{r}
+dcmp <- us_retail_employment |>
+  model(stl = STL(Employed))
+components(dcmp)
+```
+
+```{r}
+components(dcmp) |>
+  as_tsibble() |>
+  autoplot(Employed, colour="gray") +
+  geom_line(aes(y=trend), color="#D55E00") +
+  labs(
+    y = "Persons (thousands)",
+    title = "Total employment in US retail"
+  )
+```
+
+```{r}
+components(dcmp) |> autoplot()
+```
+
+## Seasonally adjusted data
+
+```{r}
+components(dcmp) |>
+  as_tsibble() |>
+  autoplot(Employed, color='gray') +
+  geom_line(aes(y=season_adjust), colour="#0072B2") +
+  labs(y = "Persons (thousands)",
+       title = "Total employment in US retail")
+  
+```
+
+Seasonally adjusted series contain the remainder component as well as the trend-cycle. Therefore, they are not “smooth”, and “downturns” or “upturns” can be misleading. If the purpose is to look for turning points in a series, and interpret any changes in direction, then it is better to use the trend-cycle component rather than the seasonally adjusted data.
+
