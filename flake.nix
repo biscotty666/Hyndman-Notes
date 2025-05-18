@@ -27,6 +27,7 @@
             rPackages.tidyverse
             rPackages.latex2exp
             rPackages.GGally
+            rPackages.seasonal
             chromium
             pandoc
             texlive.combined.scheme-full

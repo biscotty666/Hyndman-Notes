@@ -1,0 +1,39 @@
+---
+title: "3.6 - STL Decomposition"
+format: gfm
+---
+
+```{r, setup, include=FALSE}
+knitr::opts_chunk$set(paged.print = FALSE)
+```
+
+```{r}
+library(fpp3)
+```
+
+# 3.6 STL decomposition
+
+STL has several advantages over classical decomposition, and the SEATS and X-11 methods:
+
+-   Unlike SEATS and X-11, STL will handle any type of seasonality, not only monthly and quarterly data.
+-   The seasonal component is allowed to change over time, and the rate of change can be controlled by the user.
+-   The smoothness of the trend-cycle can also be controlled by the user.
+-   It can be robust to outliers (i.e., the user can specify a robust decomposition), so that occasional unusual observations will not affect the estimates of the trend-cycle and seasonal components. They will, however, affect the remainder component.
+
+On the other hand, STL has some disadvantages. In particular, it does not handle trading day or calendar variation automatically, and it only provides facilities for additive decompositions.
+
+```{r}
+us_retail_employment <- us_employment |>
+  filter(year(Month) >= 1990, Title == "Retail Trade") |>
+  select(-Series_ID)
+```
+
+```{r}
+us_retail_employment |>
+  model(
+    STL(Employed ~ trend(window = 7) +
+                   season(window = "periodic"),
+    robust = TRUE)) |>
+  components() |>
+  autoplot()
+```
